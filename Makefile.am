@@ -1136,10 +1136,10 @@ EXTRA_DIST += \
 
 %.build-headers-test.c: %
 	mkdir -p "$(dir $@)"
-	printf "#include <$$(echo "$<" | sed 's|.*\<include/netlink/|netlink/|')>\nint main(int argc, char **argv) { return 0; }" > $@
+	printf "#include <$$(echo "$<" | sed 's|.*\<include/netlink/|netlink/|')>\nint main(void) { return 0; }" > $@
 
 %.build-headers-test.o: %.build-headers-test.c
-	$(COMPILE) -Wall -Werror -Wno-error=cpp -I$(srcdir)/include -I$(builddir)/include -c -o $@ $<
+	$(CC) -Wall -Werror -D_NL_NO_WARN_DEPRECATED_HEADER -I$(srcdir)/include -I$(builddir)/include -c -o $@ $<
 
 BUILD_HEADERS_OBJS = $(patsubst %,%.build-headers-test.o,$(public_headers))
 
@@ -1150,6 +1150,25 @@ check-local-build-headers: $(BUILD_HEADERS_OBJS)
 CLEANFILES += $(BUILD_HEADERS_OBJS)
 
 check_local += check-local-build-headers
+
+###############################################################################
+
+if HAS_CXX
+%.build-headers-test-cxx.c: %
+	mkdir -p "$(dir $@)"
+	printf "#include <cstdio>\n#include <$$(echo "$<" | sed 's|.*\<include/netlink/|netlink/|')>\nint main(void) { return 0; }" > $@
+
+%.build-headers-test-cxx.o: %.build-headers-test-cxx.c %.build-headers-test.o
+	$(CXX) -Wall -Werror -D_NL_NO_WARN_DEPRECATED_HEADER -I$(srcdir)/include -I$(builddir)/include -c -o $@ $<
+
+BUILD_HEADERS_OBJS_CXX = $(patsubst %,%.build-headers-test-cxx.o,$(public_headers))
+
+CLEANFILES += $(BUILD_HEADERS_OBJS_CXX)
+
+check-local-build-headers-cxx: $(BUILD_HEADERS_OBJS_CXX)
+
+check_local += check-local-build-headers-cxx
+endif
 
 ###############################################################################
 
