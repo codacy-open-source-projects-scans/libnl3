@@ -35,11 +35,18 @@ pkgconfig_DATA = \
 warn_cppflags = \
 	-Wall \
 	-Wextra \
+	\
+	-Wdeclaration-after-statement \
 	-Wmissing-prototypes \
-	-Wno-unused-parameter \
-	-Wno-sign-compare \
-	-Wno-missing-field-initializers \
 	-Wpointer-arith \
+	-Wvla \
+	\
+	-Wno-unused-parameter \
+	$(NULL)
+
+defines_cppflags = \
+	-D_NL_SYSCONFDIR_LIBNL=\"$(sysconfdir)/libnl\" \
+	-D_NL_PKGLIBDIR=\"$(pkglibdir)\" \
 	$(NULL)
 
 ###############################################################################
@@ -388,8 +395,7 @@ default_includes = \
 
 lib_cppflags = \
 	$(warn_cppflags) \
-	-D_GNU_SOURCE \
-	-DSYSCONFDIR=\"$(sysconfdir)/libnl\" \
+	$(defines_cppflags) \
 	$(default_includes) \
 	$(NULL)
 
@@ -706,9 +712,7 @@ EXTRA_src_lib_libnl_cli_3_la_DEPENDENCIES = \
 	libnl-cli-3.sym
 src_lib_libnl_cli_3_la_CPPFLAGS = \
 	$(warn_cppflags) \
-	-D_GNU_SOURCE \
-	-DPKGLIBDIR=\"$(pkglibdir)\" \
-	-DSYSCONFDIR=\"$(sysconfdir)\" \
+	$(defines_cppflags) \
 	$(default_includes) \
 	$(NULL)
 src_lib_libnl_cli_3_la_LDFLAGS = \
@@ -726,8 +730,7 @@ src_lib_libnl_cli_3_la_LIBADD = \
 
 src_cppflags = \
 	$(warn_cppflags) \
-	-D_GNU_SOURCE \
-	-DSYSCONFDIR=\"$(sysconfdir)/libnl\" \
+	$(defines_cppflags) \
 	$(default_includes) \
 	$(NULL)
 
@@ -906,8 +909,7 @@ src_nl_util_addr_LDADD =            $(src_ldadd)
 
 tests_cppflags = \
 	$(warn_cppflags) \
-	-D_GNU_SOURCE \
-	-DSYSCONFDIR=\"$(sysconfdir)/libnl\" \
+	$(defines_cppflags) \
 	$(default_includes) \
 	$(NULL)
 
