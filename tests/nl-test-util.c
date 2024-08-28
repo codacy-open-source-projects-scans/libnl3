@@ -262,6 +262,50 @@ char *_nltst_object_to_string(const struct nl_object *obj)
 	return s;
 }
 
+char *_nltst_objects_to_string(const char *description,
+			       struct nl_object *const *objs, ssize_t len)
+{
+	_nl_auto_free char *result = NULL;
+	size_t extra_len;
+	size_t start_idx;
+	size_t l;
+	size_t i;
+
+	l = _nl_ptrarray_len(objs, len);
+
+	start_idx = 0;
+	extra_len = 300 + (description ? strlen(description) : 0u);
+
+	result = _nltst_malloc0(extra_len);
+
+	_nltst_sprintf(result, &start_idx, &extra_len, ">>> [%zu] objects", l);
+	if (description) {
+		_nltst_sprintf(result, &start_idx, &extra_len, " (%s)",
+			       description);
+	}
+	_nltst_sprintf(result, &start_idx, &extra_len, "\n");
+
+	for (i = 0; i < l; i++) {
+		_nl_auto_free char *s = NULL;
+		size_t slen;
+		size_t extra_len;
+
+		s = _nltst_object_to_string(objs[i]);
+		slen = strlen(s);
+
+		/* Don't bother to calculate the exact extra space. Just always
+		 * reallocate enough. */
+		extra_len = slen + 100;
+		result = _nltst_assert_nonnull(
+			realloc(result, start_idx + extra_len));
+
+		_nltst_sprintf(result, &start_idx, &extra_len, ">>> [%zu] %s\n",
+			       i, s);
+	}
+
+	return _nl_steal_pointer(&result);
+}
+
 struct cache_get_all_data {
 	struct nl_object **arr;
 	size_t len;
@@ -892,9 +936,7 @@ bool _nltst_select_route_match(struct nl_object *route,
 
 	ck_assert_ptr_nonnull(route);
 	ck_assert_str_eq(nl_object_get_type(route), "route/route");
-
-	if (!select_route)
-		return true;
+	ck_assert_ptr_nonnull(select_route);
 
 	route_ = (struct rtnl_route *)route;
 
@@ -989,42 +1031,138 @@ bool _nltst_select_route_match(struct nl_object *route,
 
 #undef _check
 
-	return false;
+	return true;
 }
 
 /*****************************************************************************/
 
+static void _nltst_assert_route_list_print(struct nl_object *const *objs,
+					   size_t l_objs,
+					   const char *const *expected_routes,
+					   size_t l_expected)
+{
+	_nl_auto_free char *s2 =
+		_nltst_objects_to_string("route-list", objs, l_objs);
+	size_t j;
+
+	printf("route content: %s", s2);
+	printf("expected routes: %zu\n", l_expected);
+	for (j = 0; j < l_expected; j++) {
+		printf("expected route: [%zu] %s\n", j, expected_routes[j]);
+	}
+	printf("ip-route:>>>\n");
+	_nltst_system("ip -d -4 route show table all");
+	_nltst_system("ip -d -6 route show table all");
+	printf("<<<\n");
+}
+
+static bool
+_nltst_assert_route_list_equal(struct nl_object *const *objs,
+			       const NLTstSelectRoute *expected_route_selects,
+			       size_t len)
+{
+	size_t i;
+
+	for (i = 0; i < len; i++) {
+		struct nl_object *route = objs[i];
+		const NLTstSelectRoute *select_route =
+			&expected_route_selects[i];
+
+		if (!_nltst_select_route_match(route, select_route, false))
+			return false;
+	}
+	return true;
+}
+
+typedef struct {
+	const NLTstSelectRoute *expected_route_selects;
+} NltstAssertRouteListPermData;
+
+static bool
+_nltst_assert_route_list_permutate(const NltstAssertRouteListPermData *data,
+				   struct nl_object **objs, size_t idx,
+				   size_t num)
+{
+	size_t i;
+
+	if (idx + 1 == num)
+		return true;
+
+	for (i = idx; i < num; i++) {
+		if (!_nltst_select_route_match(
+			    objs[i], &data->expected_route_selects[idx],
+			    false)) {
+			/* This entry does not match. We can shortcut this permutation. */
+			continue;
+		}
+		_nl_swap(&objs[idx], &objs[i]);
+		if (_nltst_assert_route_list_permutate(data, objs, idx + 1,
+						       num)) {
+			/* This is a permutation that matches. Leave objs in
+			 * this order and return */
+			return true;
+		}
+		_nl_swap(&objs[idx], &objs[i]);
+	}
+	return false;
+}
+
 void _nltst_assert_route_list(struct nl_object *const *objs, ssize_t len,
 			      const char *const *expected_routes)
 {
-	size_t l;
+	const size_t l_expected = _nl_ptrarray_len(expected_routes, -1);
+	const size_t l_objs = _nl_ptrarray_len(objs, len);
+	_nl_auto_free NLTstSelectRoute *expected_route_selects = NULL;
+	_nl_auto_free struct nl_object **objs2 = NULL;
 	size_t i;
 
-	if (len < 0) {
-		l = 0;
-		if (objs) {
-			while (objs[l])
-				l++;
+	if (l_expected != l_objs)
+		goto out_fail;
+
+	if (l_objs == 0)
+		goto out_free;
+
+	objs2 = _nltst_assert_nonnull(
+		_nl_memdup(objs, sizeof(struct nl_object *) * l_objs));
+
+	expected_route_selects =
+		_nltst_malloc0(sizeof(NLTstSelectRoute) * (l_expected + 1u));
+	for (i = 0; i < l_expected; i++) {
+		_nltst_select_route_parse(expected_routes[i],
+					  &expected_route_selects[i]);
+	}
+
+	/* Permutate through the list of objects and check that we find at
+	 * least one match with the list of expected routes. */
+	if (!_nltst_assert_route_list_permutate(
+		    &((const NltstAssertRouteListPermData){
+			    .expected_route_selects = expected_route_selects,
+		    }),
+		    objs2, 0, l_objs))
+		goto out_fail;
+
+	if (!_nltst_assert_route_list_equal(objs2, expected_route_selects,
+					    len)) {
+		_nltst_assert_route_list_print(objs, l_objs, expected_routes,
+					       l_expected);
+		ck_abort_msg(
+			"there is a in _nltst_assert_route_list_permutate(), the permutation should now match");
+	}
+
+	goto out_free;
+
+out_fail:
+	_nltst_assert_route_list_print(objs, l_objs, expected_routes,
+				       l_expected);
+	ck_abort_msg(
+		"The list of %zu routes did not find a one-to-one match with the list of %zu expected routes",
+		l_objs, l_expected);
+
+out_free:
+	if (expected_route_selects) {
+		for (i = 0; i < l_expected; i++) {
+			_nltst_select_route_clear(&expected_route_selects[i]);
 		}
-	} else
-		l = len;
-
-	for (i = 0; i < l; i++) {
-		struct nl_object *route = objs[i];
-		_nltst_auto_clear_select_route NLTstSelectRoute select_route = {
-			0
-		};
-		_nl_auto_free char *s = _nltst_object_to_string(route);
-
-		if (!expected_routes[i]) {
-			ck_abort_msg(
-				"No more expected route, but have route %zu (of %zu) as %s",
-				i + 1, l, s);
-		}
-
-		_nltst_select_route_parse(expected_routes[i], &select_route);
-
-		_nltst_select_route_match(route, &select_route, true);
 	}
 }
 
